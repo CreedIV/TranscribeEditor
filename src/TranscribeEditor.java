@@ -12,6 +12,7 @@ import javafx.scene.layout.*;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 import javafx.scene.control.*;
+import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ScrollPane.ScrollBarPolicy;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
@@ -74,6 +75,7 @@ public class TranscribeEditor extends Application {
 		transcriptText.deselect();
 		transcriptText.selectNextWord();
 		transcriptText.setWrapText(true);
+		transcriptText.setEditable(false);
 		transcriptText.setPrefHeight(TRANSCRIPT_HEIGHT);
 
 		scrollPane.setOnScroll((ScrollEvent event) -> { scrollPane.setHvalue(scrollPane.getHvalue() + (event.getDeltaY()/Math.abs(event.getDeltaY()))*SCROLL_DELTA); });
@@ -286,6 +288,18 @@ public class TranscribeEditor extends Application {
         MenuItem saveJson = new MenuItem("_Save JSON Transcription");
         MenuItem exit = new MenuItem("_Exit");
         
+        Menu helpMenu = new Menu("_Help");
+        MenuItem about = new MenuItem("About");
+        helpMenu.getItems().addAll(about);
+        
+        
+        Alert alert = new Alert(AlertType.INFORMATION);
+        alert.setTitle("About");
+        alert.setHeaderText(null);
+        alert.setContentText("Copyright 2018, Creed Alexander Erickson IV, All rights reserved.");
+
+        about.setOnAction((ActionEvent ae)-> { alert.showAndWait(); });
+        
         openJson.setOnAction((ActionEvent ae) -> { if( (jsonFilename = TranscribeUtils.getJSONFile()) != null ) loadCenterFromJsonFile(); });
         openMp3.setOnAction((ActionEvent ae) -> { mp3Filename = TranscribeUtils.getMp3File(); });
         saveJson.setOnAction((ActionEvent ae)->{ 
@@ -302,7 +316,7 @@ public class TranscribeEditor extends Application {
         exit.setAccelerator(KeyCombination.keyCombination("shortcut+X"));
      
         fileMenu.getItems().addAll(openJson, openMp3, new SeparatorMenuItem(), saveJson, new SeparatorMenuItem(), exit);
-        mb.getMenus().add(fileMenu);
+        mb.getMenus().addAll(fileMenu,helpMenu);
         return mb;
     }
 
