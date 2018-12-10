@@ -49,6 +49,7 @@ public class TranscribeEditor extends Application {
 	AWSTranscript awsTranscript = null;
 	
 	static MediaPlayer mediaPlayer = null;
+	Clip clip = null;  
 
 	// is there a better way than to have all these floating out here?
 	TextArea transcriptText = new TextArea();
@@ -280,7 +281,10 @@ public class TranscribeEditor extends Application {
 		 
 		try {
 			AudioInputStream clipStream = TranscribeUtils.createClip(audioFilename, start_time, end_time);
-			Clip clip = AudioSystem.getClip();
+		    if(clip != null && clip.isOpen())
+		    	clip.close();
+		    else if(clip == null)
+				clip = AudioSystem.getClip();
 			clip.open(clipStream);
 		    clip.setFramePosition(0);
 		    clip.start();
@@ -435,6 +439,7 @@ public class TranscribeEditor extends Application {
 			AudioInputStream startStream = TranscribeUtils.createClip(audioFilename, start_timeStr, end_timeStr);
 	        File outfile = new File(outfilename);
 	        AudioSystem.write(startStream, Type.WAVE, outfile);
+	        startStream.close();
 		}catch(Exception e) {
 			e.printStackTrace();
 		}
@@ -445,31 +450,27 @@ public class TranscribeEditor extends Application {
 	}
 	
 	public void playOrPause(Double start_time) {
-    	System.out.println("playorPause");
 		if(audioFilename == null) { // if no mp3 file opened, provide open dialog box
 			audioFilename = TranscribeUtils.getAudioFile();
 			if(audioFilename == null)
 				return;
 		}
         if(mediaPlayer == null) { 
-        	System.out.println("play with null meidaPlayer");
         	File file = new File(audioFilename);
             Media media = new Media(file.toURI().toString());
             
             mediaPlayer = new MediaPlayer(media);
         }
         if(start_time != null) {
-        	System.out.println("play from start time");
         	Duration skiptime = new Duration(start_time*1_000);
         	mediaPlayer.stop();
         	mediaPlayer.setStartTime(skiptime);
+        	mediaPlayer.seek(skiptime);
         	mediaPlayer.play();
         }else if(mediaPlayer.statusProperty().getValue() == MediaPlayer.Status.PLAYING) {
-        	System.out.println("pausing");
         	mediaPlayer.pause();
         	mediaPlayer.setStartTime(mediaPlayer.getCurrentTime()); // try to fix odd mediaPlayer issue, there are bugs in mediaPlayer..... it doesnt work as it should
         }else {
-        	System.out.println("playing, status : " +         	mediaPlayer.statusProperty().getValue());
         	mediaPlayer.play();
         }
 	}

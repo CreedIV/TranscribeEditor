@@ -50,6 +50,7 @@ public class TranscribeUtils {
 			int start_frame = clip.getFramePosition();
 			clip.setMicrosecondPosition(end_timeL);
 			int end_frame = clip.getFramePosition();
+			clip.close();
 	
 			// get size of desired portion in bytes
 			int bytesPerFrame = format.getFrameSize();
