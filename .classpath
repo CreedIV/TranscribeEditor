@@ -4,5 +4,8 @@
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="lib" path="C:/Users/Zuse/Documents/eclipse-jee-workspace/TranscribeEditor/json-simple-1.1.1.jar"/>
 	<classpathentry kind="lib" path="C:/Users/Zuse/Documents/eclipse-jee-workspace/TranscribeEditor/gson-2.8.5.jar"/>
+	<classpathentry kind="lib" path="C:/Users/Zuse/Documents/eclipse-jee-workspace/TranscribeEditor/jl1.0.1.jar"/>
+	<classpathentry kind="lib" path="C:/Users/Zuse/Documents/eclipse-jee-workspace/TranscribeEditor/mp3spi1.9.5.jar"/>
+	<classpathentry kind="lib" path="C:/Users/Zuse/Documents/eclipse-jee-workspace/TranscribeEditor/tritonus_share.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

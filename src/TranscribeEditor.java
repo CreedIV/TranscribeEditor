@@ -4,10 +4,9 @@ import javafx.animation.AnimationTimer;
 import javafx.application.*;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.SimpleLongProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
 import javafx.scene.*;
 import javafx.stage.*;
+import javafx.util.Duration;
 import javafx.scene.layout.*;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
@@ -23,7 +22,12 @@ import javafx.geometry.Pos;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.regex.Pattern;
+import java.util.Iterator;
+
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.AudioFileFormat.Type;
 
 public class TranscribeEditor extends Application {
 	
@@ -32,17 +36,19 @@ public class TranscribeEditor extends Application {
     static final double CONFIDENCE_LIMIT = .5;
     static final int SCENE_WIDTH = 1200;
     static final int TRANSCRIPT_HEIGHT = 600;
-    static final int SCENE_HEIGHT = TRANSCRIPT_HEIGHT + 170;
+    static final int SCENE_HEIGHT = TRANSCRIPT_HEIGHT + 220;
     static final int BEHIND_LIMIT = 10;
-	static final int VBOX_WIDTH = 70;
-	static final int SCROLL_TOL = VBOX_WIDTH;
+	static final int VBOX_WIDTH = 75;
+	static final int SCROLL_TOL = 2*VBOX_WIDTH;
     static final long MIN_UPDATE_INTERVAL = 100000 ; // nanoseconds. Set to higher number to slow update.
     static final ScrollEvent FAKE_SCROLL = new ScrollEvent(null, 0, 0, 0, 0, false, false, false, false, false, false, 0, 1, 0, 0, 0, 0, null, 0, null, 0, 0, null);
 	
-    String mp3Filename = null; //"L1.mp3";
+    String audioFilename = null; //"L1.mp3";
 	String jsonFilename = null; //"Lesson1.json";
 	
-	AWSTranscriptObj awsTranscription = null;
+	AWSTranscript awsTranscript = null;
+	
+	static MediaPlayer mediaPlayer = null;
 
 	// is there a better way than to have all these floating out here?
 	TextArea transcriptText = new TextArea();
@@ -52,7 +58,6 @@ public class TranscribeEditor extends Application {
 	HBox outerHBox = new HBox();
 	VBox bigVbox = new VBox();
 	
-	MediaPlayer mediaPlayer = null;
 	ArrayList<VBox> vBoxedItems;
 	
     int currTransItem = 0; // should i be using bean properties for this?
@@ -71,12 +76,11 @@ public class TranscribeEditor extends Application {
         
         MenuBar mb = createMenus();
         FlowPane bottomPane = createBottomPane();
-        
-		transcriptText.deselect();
-		transcriptText.selectNextWord();
 		transcriptText.setWrapText(true);
 		transcriptText.setEditable(false);
 		transcriptText.setPrefHeight(TRANSCRIPT_HEIGHT);
+		transcriptText.setText("If you load a non .wav audio file (like .mp3), there will be a slight delay when first playing single words. "
+				+ "A temporary .wav file will be created to allow for easier word extraction. If you want faster single word play-back, use .wav files.");
 
 		scrollPane.setOnScroll((ScrollEvent event) -> { scrollPane.setHvalue(scrollPane.getHvalue() + (event.getDeltaY()/Math.abs(event.getDeltaY()))*SCROLL_DELTA); });
 		scrollPane.setVbarPolicy(ScrollBarPolicy.NEVER);
@@ -85,13 +89,13 @@ public class TranscribeEditor extends Application {
 		scrollPane.setFitToHeight(true);
 		scrollPane.setContent(scrollingHBox);
         
+		bigVbox.getChildren().add(transcriptText);
         rootNode.setTop(mb);
         rootNode.setCenter(bigVbox);
         rootNode.setBottom(bottomPane);
         
         AnimationTimer timer = getTimer();
         timer.start();
-        
         myStage.show();
     }
     
@@ -147,44 +151,80 @@ public class TranscribeEditor extends Application {
 	}
 
 	protected String getStartTime(VBox vBox) {
-		TextField tf = (TextField) vBox.getChildren().get(2); // start time is 3 element; content, confidence, start_time, end_time
+		TextField tf = (TextField) vBox.getChildren().get(3); // start time is 4 element; content, speaker confidence, start_time, end_time
 		return tf.getText();
 	}
 
 	private void loadCenterFromJsonFile() {
-		awsTranscription = AWSTranscriptObj.createFromFile(jsonFilename);
-		transcriptText.setText(awsTranscription.results.transcripts[0].transcript);
+		awsTranscript = AWSTranscript.createFromFile(jsonFilename);
+		transcriptText.setText(awsTranscript.results.transcripts[0].transcript);
 		
 		vBoxedItems = new ArrayList<VBox>();
 		Integer i = 0;
-		for(AWSTranscriptItem transItem : awsTranscription.results.items) {
+		for(AWSTranscriptItem transItem : awsTranscript.results.items) {
 			vBoxedItems.add(createVBoxItem(transItem, i.toString()));
 			i++;
 		}
-
-		transcriptText.setText(awsTranscription.results.transcripts[0].transcript);
+		transcriptText.setText(awsTranscript.results.transcripts[0].transcript);
+		transcriptText.deselect();
+		transcriptText.selectNextWord();
+		
 		scrollingHBox.getChildren().clear();
 		bigVbox.getChildren().clear();
+		outerHBox.getChildren().clear();
 		scrollingHBox.getChildren().addAll(vBoxedItems);
-		bigVbox.getChildren().addAll(transcriptText, scrollPane);
+		
+		VBox labels = createLabelsVBox();
+		labels.setMinWidth(1.25*VBOX_WIDTH);
+		outerHBox.getChildren().addAll(labels, scrollPane);
+		bigVbox.getChildren().addAll(transcriptText, outerHBox);
 	}
 	
+
+	public VBox createLabelsVBox() {
+		VBox vbox = new VBox();
+		
+		Label savecontent = new Label("save word");
+		TextField content = new TextField("content");
+		TextField speaker_label = new TextField("speaker_label");
+		TextField confidence = new TextField("confidence");
+		TextField start_time = new TextField("start_time");
+		TextField end_time = new TextField("end_time");
+		content.setEditable(false);
+		speaker_label.setEditable(false);
+		confidence.setEditable(false);
+		start_time.setEditable(false);
+		end_time.setEditable(false);
+		content.setStyle("-fx-background-color: gray;");
+		speaker_label.setStyle("-fx-background-color: gray;");
+		confidence.setStyle("-fx-background-color: gray;");
+		start_time.setStyle("-fx-background-color: gray;");
+		end_time.setStyle("-fx-background-color: gray;");
+		
+		vbox.getChildren().addAll(content, speaker_label, confidence, start_time, end_time, savecontent);
+		return vbox;
+	}
 	
 	public VBox createVBoxItem(AWSTranscriptItem transItem, String id ) {
 		VBox vbox = new VBox();
 		
 		vbox.setId(id);
+		CheckBox saveBox = new CheckBox();
 		TextField content = new TextField(transItem.alternatives[0].content);
+		TextField speaker_label = new TextField(transItem.speaker_label);
 		TextField confidence = new TextField(transItem.alternatives[0].confidence);
 		TextField start_time = new TextField(transItem.start_time);
 		TextField end_time = new TextField(transItem.end_time);
 		content.setPrefWidth(VBOX_WIDTH);
+		speaker_label.setPrefWidth(VBOX_WIDTH);
 		confidence.setPrefWidth(VBOX_WIDTH);
 		start_time.setPrefWidth(VBOX_WIDTH);
 		end_time.setPrefWidth(VBOX_WIDTH);
 		
         // Create an Edit popup menu, and menu items
 		ContextMenu contextMenu = new ContextMenu();
+		MenuItem listen = new MenuItem("Listen to word");
+		MenuItem playHere = new MenuItem("Play from here");
         MenuItem insertBefore = new MenuItem("Insert Before");
         MenuItem insertAfter = new MenuItem("Insert After");
         MenuItem delete = new MenuItem("Delete");
@@ -193,29 +233,62 @@ public class TranscribeEditor extends Application {
         insertBefore.setOnAction((ActionEvent ae)->{ insertColumn(vbox.getId()); });
         insertAfter.setOnAction((ActionEvent ae)->{ insertColumn( ((Integer)(Integer.parseInt(vbox.getId()) + 1)).toString() ); });
         delete.setOnAction((ActionEvent ae)->{ removeColumn(vbox.getId()); });
+        listen.setOnAction((ActionEvent ae)->{ playWord(vbox.getId()); });
+        playHere.setOnAction((ActionEvent ae)->{ playFromHere(vbox.getId()); });
          
         // Add the menu items to the popup menu
-        contextMenu.getItems().addAll(insertBefore, insertAfter, new SeparatorMenuItem(), delete);
+        contextMenu.getItems().addAll(listen, playHere, new SeparatorMenuItem(), insertBefore, insertAfter, new SeparatorMenuItem(), delete);
         
         // add menu to vbox content
 		content.setContextMenu(contextMenu);
+		speaker_label.setContextMenu(contextMenu);
 		confidence.setContextMenu(contextMenu);
 		start_time.setContextMenu(contextMenu);
 		end_time.setContextMenu(contextMenu);
 		
-		// update transcription on edit...
+		// update transcription on edit... keeps things up to date, in real time. better for sync, worse for performance
 		content.setOnKeyReleased((KeyEvent ke)->{ refreshTranscriptText(); }); 
+		speaker_label.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
+		confidence.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript);});
+		start_time.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
+		end_time.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
 		
 		// flag items with low confidence
 		if((transItem.alternatives[0].confidence != null) && (Double.parseDouble(transItem.alternatives[0].confidence) < CONFIDENCE_LIMIT)) {
 			confidence.setStyle("-fx-background-color: red;");
 		}
-		vbox.getChildren().addAll(content, confidence, start_time, end_time);
+		vbox.setAlignment(Pos.CENTER);
+		vbox.getChildren().addAll(content, speaker_label, confidence, start_time, end_time, saveBox);
 		
 		return vbox;
 	}
 
+	private void playFromHere(String id) {
+		VBox vbox = vBoxedItems.get(Integer.parseInt(id));
+		String start_time = ((TextField)vbox.getChildren().get(3)).getText();
+		if(start_time.equals(""))
+			return;
+		playOrPause(Double.parseDouble(start_time));
+	}
 	
+	private void playWord(String id) {
+		if(audioFilename == null)
+			return;
+		VBox vbox = vBoxedItems.get(Integer.parseInt(id));
+		String start_time = ((TextField)vbox.getChildren().get(3)).getText();
+		String end_time = ((TextField)vbox.getChildren().get(4)).getText();
+		 
+		try {
+			AudioInputStream clipStream = TranscribeUtils.createClip(audioFilename, start_time, end_time);
+			Clip clip = AudioSystem.getClip();
+			clip.open(clipStream);
+		    clip.setFramePosition(0);
+		    clip.start();
+		}catch(Exception e) {
+			e.printStackTrace();
+	    }
+	}
+
 	private void removeColumn(String id) {
 		// subtract one to ids of all later vboxes
 		int idx = Integer.parseInt(id);
@@ -250,41 +323,18 @@ public class TranscribeEditor extends Application {
     }
 
 	private void refreshTranscriptText() {
-		updateTranscriptObj();
-		transcriptText.setText(awsTranscription.results.transcripts[0].transcript);
+		TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript);
+		transcriptText.setText(awsTranscript.results.transcripts[0].transcript);
 	}
 	
-	private void updateTranscriptObj() {
-		//update AwsTranscriptObj from vBoxedItems
-		//completely replace items in AwsTranscriptObj with new items from vboxedItems and create new transcript in process
-		
-		AWSTranscriptItem[] newItems = new AWSTranscriptItem[vBoxedItems.size()];
-		String newTranscript = "";
-		int i = 0;
-		for(VBox vboxItem : vBoxedItems) {
-	        
-			ObservableList<Node> vboxChildren = FXCollections.observableArrayList(vboxItem.getChildren());
-			String content = ((TextField) vboxChildren.get(0)).getText();
-			String confidence = ((TextField) vboxChildren.get(1)).getText();
-			String start_time = ((TextField) vboxChildren.get(2)).getText();
-			String end_time = ((TextField) vboxChildren.get(3)).getText();
-			
-			newItems[i++] = new AWSTranscriptItem(content, confidence, start_time, end_time);
-			if(content.length() == 1 && Pattern.matches("[\\p{Punct}\\p{IsPunctuation}]", content))
-				newTranscript += content;
-			else
-				newTranscript += " " + content;				
-		}
-		awsTranscription.results.items = newItems;
-		awsTranscription.results.transcripts[0].transcript = newTranscript;
-	}
+
 
 	private MenuBar createMenus() {
         MenuBar mb = new MenuBar();
         
         Menu fileMenu = new Menu("_File");
         MenuItem openJson = new MenuItem("Open _JSON Transcription");
-        MenuItem openMp3 = new MenuItem("Open _Mp3");
+        MenuItem openAudio = new MenuItem("Open _Audio");
         MenuItem saveJson = new MenuItem("_Save JSON Transcription");
         MenuItem exit = new MenuItem("_Exit");
         
@@ -301,21 +351,27 @@ public class TranscribeEditor extends Application {
         about.setOnAction((ActionEvent ae)-> { alert.showAndWait(); });
         
         openJson.setOnAction((ActionEvent ae) -> { if( (jsonFilename = TranscribeUtils.getJSONFile()) != null ) loadCenterFromJsonFile(); });
-        openMp3.setOnAction((ActionEvent ae) -> { mp3Filename = TranscribeUtils.getMp3File(); });
+        openAudio.setOnAction((ActionEvent ae) -> { 
+        	audioFilename = TranscribeUtils.getAudioFile(); 
+        	if(mediaPlayer != null) {
+        		mediaPlayer.dispose();
+        		mediaPlayer = null;
+        	}
+        });
         saveJson.setOnAction((ActionEvent ae)->{ 
-        	if(awsTranscription != null) {
-        		//updateTranscriptObj();
-        		TranscribeUtils.saveJsonFile(awsTranscription);
+        	if(awsTranscript != null) {
+        		//updateTranscriptObj(); // we shouldnt need to update since we keep things up-to-date in real time, but this might be needed if we have sync problems...
+        		TranscribeUtils.saveJsonFile(awsTranscript);
         	}
         });
         exit.setOnAction((ActionEvent ae) -> {Platform.exit();});
         
         openJson.setAccelerator(KeyCombination.keyCombination("shortcut+J"));
-        openMp3.setAccelerator(KeyCombination.keyCombination("shortcut+M"));
+        openAudio.setAccelerator(KeyCombination.keyCombination("shortcut+M"));
         saveJson.setAccelerator(KeyCombination.keyCombination("shortcut+S"));
         exit.setAccelerator(KeyCombination.keyCombination("shortcut+X"));
      
-        fileMenu.getItems().addAll(openJson, openMp3, new SeparatorMenuItem(), saveJson, new SeparatorMenuItem(), exit);
+        fileMenu.getItems().addAll(openJson, openAudio, new SeparatorMenuItem(), saveJson, new SeparatorMenuItem(), exit);
         mb.getMenus().addAll(fileMenu,helpMenu);
         return mb;
     }
@@ -326,33 +382,98 @@ public class TranscribeEditor extends Application {
 	    
 	    Button playButton = new Button("Play/Pause");
 	    Button slowDown = new Button("Slower");
-	    Button speedUp = new Button("Faster");
+	    Button speedUp = new Button("Faster");   
+	    
+        Button save = new Button("Save selected words"); 
+        
+        
+        save.setOnAction((ActionEvent ae)-> { saveWords();});
 	    
 	    playButton.setOnAction((ActionEvent ae)-> {playOrPause();});
 	    slowDown.setOnAction((ActionEvent ae)-> { if(mediaPlayer != null)  mediaPlayer.setRate(mediaPlayer.getRate() - MP3_SPEED_DELTA); });
 	    speedUp.setOnAction((ActionEvent ae)-> { if(mediaPlayer != null)  mediaPlayer.setRate(mediaPlayer.getRate() + MP3_SPEED_DELTA); });
 	    
-	    bottomPane.getChildren().addAll(slowDown, playButton, speedUp);
+	    bottomPane.getChildren().addAll(slowDown, playButton, speedUp, save);
 	    return bottomPane;
 	}
 	
+	
+	private void saveWords() {
+		int savedWordCount = 0;
+		
+		if(audioFilename == null) { // if no mp3 file opened, provide open dialog box
+			audioFilename = TranscribeUtils.getAudioFile();
+			if(audioFilename == null)
+				return;
+		}
+		
+		Iterator<VBox> iter = vBoxedItems.iterator();
+		while(iter.hasNext()) {
+			VBox vbox = iter.next();
+			CheckBox checkbox = (CheckBox) vbox.getChildren().get(5);
+			if(checkbox.selectedProperty().getValue() == true) {
+				String start_time = ((TextField)vbox.getChildren().get(3)).getText();
+				String end_time = ((TextField)vbox.getChildren().get(4)).getText();
+				while(iter.hasNext()) { // if consecutive vboxes are checked, find the end time by finding end_time of last box in the series
+					vbox = iter.next();
+				    checkbox = (CheckBox) vbox.getChildren().get(5);
+				    if(checkbox.selectedProperty().getValue() == true) {
+				    	end_time = ((TextField)vbox.getChildren().get(4)).getText();
+				    }else {
+				    	break;
+				    }
+				}
+				String wordFilename = "word" + ++savedWordCount + ".wav";
+				saveClip(wordFilename, start_time, end_time);	
+				System.out.println("saved : " + wordFilename);
+			}
+		}
+	}
+	
+	private void saveClip(String outfilename, String start_timeStr, String end_timeStr) {
+		try {
+			AudioInputStream startStream = TranscribeUtils.createClip(audioFilename, start_timeStr, end_timeStr);
+	        File outfile = new File(outfilename);
+	        AudioSystem.write(startStream, Type.WAVE, outfile);
+		}catch(Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
 	public void playOrPause() {
-		if(mp3Filename == null) { // if no mp3 file opened, provide open dialog box
-			mp3Filename = TranscribeUtils.getMp3File();
-			if(mp3Filename == null)
+		playOrPause(null);
+	}
+	
+	public void playOrPause(Double start_time) {
+    	System.out.println("playorPause");
+		if(audioFilename == null) { // if no mp3 file opened, provide open dialog box
+			audioFilename = TranscribeUtils.getAudioFile();
+			if(audioFilename == null)
 				return;
 		}
         if(mediaPlayer == null) { 
-        	File file = new File(mp3Filename);
+        	System.out.println("play with null meidaPlayer");
+        	File file = new File(audioFilename);
             Media media = new Media(file.toURI().toString());
+            
             mediaPlayer = new MediaPlayer(media);
         }
-        if(mediaPlayer.statusProperty().getValue() == MediaPlayer.Status.PLAYING)
-        	mediaPlayer.pause();
-        else
+        if(start_time != null) {
+        	System.out.println("play from start time");
+        	Duration skiptime = new Duration(start_time*1_000);
+        	mediaPlayer.stop();
+        	mediaPlayer.setStartTime(skiptime);
         	mediaPlayer.play();
+        }else if(mediaPlayer.statusProperty().getValue() == MediaPlayer.Status.PLAYING) {
+        	System.out.println("pausing");
+        	mediaPlayer.pause();
+        	mediaPlayer.setStartTime(mediaPlayer.getCurrentTime()); // try to fix odd mediaPlayer issue, there are bugs in mediaPlayer..... it doesnt work as it should
+        }else {
+        	System.out.println("playing, status : " +         	mediaPlayer.statusProperty().getValue());
+        	mediaPlayer.play();
+        }
 	}
+	
 	public void stop() {
-        //System.out.println("Stop called");
     }
 }
