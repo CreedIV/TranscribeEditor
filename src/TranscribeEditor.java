@@ -13,9 +13,14 @@ import javafx.scene.media.MediaPlayer;
 import javafx.scene.control.*;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ScrollPane.ScrollBarPolicy;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.DragEvent;
+import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
+import javafx.scene.input.TransferMode;
 import javafx.event.*;
 import javafx.geometry.Bounds;
 import javafx.geometry.Pos;
@@ -23,6 +28,7 @@ import javafx.geometry.Pos;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.regex.Pattern;
 
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
@@ -42,7 +48,9 @@ public class TranscribeEditor extends Application {
 	static final int SCROLL_TOL = 2*VBOX_WIDTH;
     static final long MIN_UPDATE_INTERVAL = 100000 ; // nanoseconds. Set to higher number to slow update.
     static final ScrollEvent FAKE_SCROLL = new ScrollEvent(null, 0, 0, 0, 0, false, false, false, false, false, false, 0, 1, 0, 0, 0, 0, null, 0, null, 0, 0, null);
-	
+    static final ScrollEvent FAKE_BACK_SCROLL = new ScrollEvent(null, 0, 0, 0, 0, false, false, false, false, false, false, 0, -1, 0, 0, 0, 0, null, 0, null, 0, 0, null);
+
+    
     String audioFilename = null; //"L1.mp3";
 	String jsonFilename = null; //"Lesson1.json";
 	
@@ -50,8 +58,11 @@ public class TranscribeEditor extends Application {
 	
 	static MediaPlayer mediaPlayer = null;
 	Clip clip = null;  
+	boolean mediaPlaying = false;
+	Duration skiptime = null;
 
 	// is there a better way than to have all these floating out here?
+    Scene myScene = null;
 	TextArea transcriptText = new TextArea();
 	BorderPane rootNode;
 	ScrollPane scrollPane = new ScrollPane();
@@ -71,7 +82,7 @@ public class TranscribeEditor extends Application {
     public void start(Stage myStage) {
         myStage.setTitle("Transcription Editor");
     	rootNode = new BorderPane();
-        Scene myScene = new Scene(rootNode, SCENE_WIDTH, SCENE_HEIGHT);
+        myScene = new Scene(rootNode, SCENE_WIDTH, SCENE_HEIGHT);
         
         myStage.setScene(myScene);
         
@@ -105,16 +116,12 @@ public class TranscribeEditor extends Application {
         final LongProperty itemsBehind = new SimpleLongProperty();
         
 		AnimationTimer timer = new AnimationTimer() {
-
-			// this turned into a monster and is not very robust, it cant recover from manual moving of cursor in text, rewrite would be nice...
-			// it would probably be best to link the mp3 media to the vbox elements via play time, and link the vbox elements to the translation text by a counter
-			// then we can allow all to move in sync 
-            @Override
+            @Override // this will select text in the transcription to follow audio
             public void handle(long now) { 
             	if(jsonFilename == null)
             		return;
-                if (now - lastUpdate.get() > MIN_UPDATE_INTERVAL) {
-            		if(mediaPlayer != null && mediaPlayer.statusProperty().getValue() == MediaPlayer.Status.PLAYING) {
+                if (Math.abs(now - lastUpdate.get()) > MIN_UPDATE_INTERVAL) {
+            		if(mediaPlayer != null && mediaPlaying) {
             			int skip = 1;
             			if(currTransItem + skip < vBoxedItems.size()) { 
             			    String lookAhead_startTime = getStartTime(vBoxedItems.get(currTransItem + skip));
@@ -140,7 +147,7 @@ public class TranscribeEditor extends Application {
             					transcriptText.selectNextWord();
             					transcriptText.selectEndOfNextWord();
             					transcriptText.requestFocus();
-        						vBoxedItems.get(currTransItem).setStyle("-fx-border-width: 2px;   -fx-border-style: solid;"); // highlight item
+								vBoxedItems.get(currTransItem).setStyle("-fx-border-width: 2px;   -fx-border-style: solid;"); // highlight item
             				}
             			}
             		}
@@ -158,7 +165,6 @@ public class TranscribeEditor extends Application {
 
 	private void loadCenterFromJsonFile() {
 		awsTranscript = AWSTranscript.createFromFile(jsonFilename);
-		transcriptText.setText(awsTranscript.results.transcripts[0].transcript);
 		
 		vBoxedItems = new ArrayList<VBox>();
 		Integer i = 0;
@@ -166,9 +172,7 @@ public class TranscribeEditor extends Application {
 			vBoxedItems.add(createVBoxItem(transItem, i.toString()));
 			i++;
 		}
-		transcriptText.setText(awsTranscript.results.transcripts[0].transcript);
-		transcriptText.deselect();
-		transcriptText.selectNextWord();
+		refreshTranscriptText();
 		
 		scrollingHBox.getChildren().clear();
 		bigVbox.getChildren().clear();
@@ -254,8 +258,65 @@ public class TranscribeEditor extends Application {
 		start_time.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
 		end_time.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
 		
+		// add some editing conviences that I desire for faster editing
+		EventHandler<DragEvent> dragOverHandler = new EventHandler <DragEvent>() {
+            public void handle(DragEvent event){
+                if (event.getGestureSource() != event.getGestureTarget() &&
+                        event.getDragboard().hasString()) {
+                    event.acceptTransferModes(TransferMode.COPY_OR_MOVE);
+                }
+                event.consume();
+            }
+        };
+        
+        EventHandler<DragEvent> dragDroppedHandler = new EventHandler <DragEvent>() {
+        	public void handle(DragEvent event){
+	            Dragboard db = event.getDragboard();
+	            boolean success = false;
+	            if (db.hasString()) {
+	            	((TextField)event.getGestureTarget()).setText(db.getString());
+	                success = true;
+	            }
+	            event.setDropCompleted(success);
+	            event.consume();
+        	}
+        };
+        
+        EventHandler<MouseEvent> dragDetectedHandler = new EventHandler <MouseEvent>() {
+            public void handle(MouseEvent me){
+	            Dragboard db = ((Node) me.getSource()).startDragAndDrop(TransferMode.ANY);
+	            ClipboardContent data = new ClipboardContent();
+	            data.putString(((TextField) me.getSource()).getText());
+	            db.setContent(data);   
+	            me.consume();
+            }
+        };
+        
+        content.setOnDragDetected(dragDetectedHandler);
+        content.setOnDragOver(dragOverHandler);
+        content.setOnDragDropped(dragDroppedHandler);
+        start_time.setOnDragDetected(dragDetectedHandler);
+        start_time.setOnDragOver(dragOverHandler);
+        start_time.setOnDragDropped(dragDroppedHandler);
+        end_time.setOnDragDetected(dragDetectedHandler);
+        end_time.setOnDragOver(dragOverHandler);
+        end_time.setOnDragDropped(dragDroppedHandler);
+        speaker_label.setOnDragDetected(dragDetectedHandler);
+        speaker_label.setOnDragOver(dragOverHandler);
+        speaker_label.setOnDragDropped(dragDroppedHandler);
+        
+		speaker_label.setFocusTraversable(false);
+		confidence.setFocusTraversable(false);
+		start_time.setFocusTraversable(false);
+		end_time.setFocusTraversable(false);
+		saveBox.setFocusTraversable(false);
+        
+		
 		// flag items with low confidence
-		if((transItem.alternatives[0].confidence != null) && (Double.parseDouble(transItem.alternatives[0].confidence) < CONFIDENCE_LIMIT)) {
+		if(transItem.alternatives[0].confidence != null 
+		    && !transItem.alternatives[0].confidence.equals("")
+			&& (Double.parseDouble(transItem.alternatives[0].confidence) < CONFIDENCE_LIMIT)) 
+		{
 			confidence.setStyle("-fx-background-color: red;");
 		}
 		vbox.setAlignment(Pos.CENTER);
@@ -265,13 +326,71 @@ public class TranscribeEditor extends Application {
 	}
 
 	private void playFromHere(String id) {
-		VBox vbox = vBoxedItems.get(Integer.parseInt(id));
+		// after many different attempts, i got good sync in transcript tracking with this code.. 
+		Pattern punctuation_pattern = Pattern.compile("[\\p{Punct}\\p{IsPunctuation}]");
+
+		transcriptText.deselect();
+		transcriptText.selectHome();
+		transcriptText.positionCaret(0);
+		currTransItem = Integer.parseInt(id); // update position for animation
+		VBox vbox = null;
+		for(VBox box : vBoxedItems) {
+			if(box.getId().equals(id)) {
+				vbox = box;
+				break;
+			}
+			
+			String content = ((TextField)box.getChildren().get(0)).getText();
+			char contentChars[] = content.toCharArray();
+			for(char contentchar : contentChars) {  // move forward to position in transcript character by character
+				transcriptText.positionCaret(transcriptText.getCaretPosition()+1);
+			}
+
+			Boolean isPunctuation = punctuation_pattern.matcher(content).matches();
+			if(!isPunctuation)			// forward past the next space for non punctuation
+				transcriptText.positionCaret(transcriptText.getCaretPosition()+1);		
+		}
+		transcriptText.selectEndOfNextWord();
+		
 		String start_time = ((TextField)vbox.getChildren().get(3)).getText();
 		if(start_time.equals(""))
 			return;
+		
+		highlightPriorVboxes(id);
 		playOrPause(Double.parseDouble(start_time));
 	}
 	
+	private void highlightPriorVboxes(String id) {
+		Boolean passedId = false;
+		
+		for(VBox vbox : vBoxedItems) {
+			if(!passedId && vbox.getId() != null  && vbox.getId().equals(id)) {
+				passedId = true;
+				vbox.setStyle("-fx-border-width: 2px;   -fx-border-style: solid;"); // highlight selected
+			}
+			
+			if(!passedId)
+				vbox.setStyle("-fx-border-width: 2px;   -fx-border-style: solid;"); // highlight item
+			else
+				vbox.setStyle(null);
+		}
+		
+		// scoll as needed
+		Bounds boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
+		if(boundsInScene.getMinX() > 0) {
+			while(boundsInScene.getMinX() > SCROLL_TOL) {
+				scrollPane.getOnScroll().handle(FAKE_SCROLL);
+				boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
+			}
+		}else {
+			while(boundsInScene.getMaxX() < SCROLL_TOL) {
+				scrollPane.getOnScroll().handle(FAKE_BACK_SCROLL);
+				boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
+			}
+		}
+		
+	}
+
 	private void playWord(String id) {
 		if(audioFilename == null)
 			return;
@@ -403,7 +522,7 @@ public class TranscribeEditor extends Application {
 	
 	
 	private void saveWords() {
-		int savedWordCount = 0;
+		//int savedWordCount = 0;
 		
 		if(audioFilename == null) { // if no mp3 file opened, provide open dialog box
 			audioFilename = TranscribeUtils.getAudioFile();
@@ -416,6 +535,7 @@ public class TranscribeEditor extends Application {
 			VBox vbox = iter.next();
 			CheckBox checkbox = (CheckBox) vbox.getChildren().get(5);
 			if(checkbox.selectedProperty().getValue() == true) {
+				String wordFilename = ((TextField)vbox.getChildren().get(0)).getText();
 				String start_time = ((TextField)vbox.getChildren().get(3)).getText();
 				String end_time = ((TextField)vbox.getChildren().get(4)).getText();
 				while(iter.hasNext()) { // if consecutive vboxes are checked, find the end time by finding end_time of last box in the series
@@ -423,13 +543,14 @@ public class TranscribeEditor extends Application {
 				    checkbox = (CheckBox) vbox.getChildren().get(5);
 				    if(checkbox.selectedProperty().getValue() == true) {
 				    	end_time = ((TextField)vbox.getChildren().get(4)).getText();
+				    	wordFilename += ((TextField)vbox.getChildren().get(0)).getText();
 				    }else {
 				    	break;
 				    }
 				}
-				String wordFilename = "word" + ++savedWordCount + ".wav";
+				System.out.println("lessonWords.add(new String[] { \"" + wordFilename + "\", \"\"});");
+				wordFilename += ".wav";
 				saveClip(wordFilename, start_time, end_time);	
-				System.out.println("saved : " + wordFilename);
 			}
 		}
 	}
@@ -449,29 +570,41 @@ public class TranscribeEditor extends Application {
 		playOrPause(null);
 	}
 	
-	public void playOrPause(Double start_time) {
+	public void playOrPause(Double start_time) { // this turned messy due to mediaPlayer pause, play bug
 		if(audioFilename == null) { // if no mp3 file opened, provide open dialog box
 			audioFilename = TranscribeUtils.getAudioFile();
 			if(audioFilename == null)
 				return;
 		}
-        if(mediaPlayer == null) { 
+		
+		if(mediaPlayer != null) { // if there was a mediaplayer, kill old media players because .pause .play doenst work right
+			if(start_time == null && mediaPlaying) {  // before disposing, if not asked to play at a time, and we where playing, record our current time.
+				skiptime = mediaPlayer.getCurrentTime(); // record where we were playing
+			}
+			mediaPlayer.dispose();
+		}
+
+        if(start_time != null) { // if asked to play at a time, play at that time
+        	skiptime = new Duration(start_time*1_000);
         	File file = new File(audioFilename);
             Media media = new Media(file.toURI().toString());
-            
             mediaPlayer = new MediaPlayer(media);
-        }
-        if(start_time != null) {
-        	Duration skiptime = new Duration(start_time*1_000);
         	mediaPlayer.stop();
         	mediaPlayer.setStartTime(skiptime);
         	mediaPlayer.seek(skiptime);
         	mediaPlayer.play();
-        }else if(mediaPlayer.statusProperty().getValue() == MediaPlayer.Status.PLAYING) {
-        	mediaPlayer.pause();
-        	mediaPlayer.setStartTime(mediaPlayer.getCurrentTime()); // try to fix odd mediaPlayer issue, there are bugs in mediaPlayer..... it doesnt work as it should
+        	mediaPlaying=true;
+        }else if(mediaPlaying) { // using my own playing status because built in status doesnt update correctly
+        	//mediaPlayer.pause();
+        	mediaPlaying=false;
         }else {
+        	File file = new File(audioFilename);
+            Media media = new Media(file.toURI().toString());
+            mediaPlayer = new MediaPlayer(media);
+            if(skiptime != null)
+            	mediaPlayer.setStartTime(skiptime); // try to fix odd mediaPlayer issue, there are bugs in mediaPlayer..... it doesnt work as it should
         	mediaPlayer.play();
+        	mediaPlaying=true;
         }
 	}
 	
