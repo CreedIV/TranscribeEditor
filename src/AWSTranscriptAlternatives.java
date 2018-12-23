@@ -13,5 +13,9 @@ public class AWSTranscriptAlternatives{
 
 	public AWSTranscriptAlternatives(JSONObject alt) {
 		confidence = (String) alt.getOrDefault("confidence", null);
-		content = (String) alt.getOrDefault("content", null);	}
+		content = (String) alt.getOrDefault("content", null);	
+	}
+	
+	public AWSTranscriptAlternatives() {
+	}
 }

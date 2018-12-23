@@ -9,4 +9,7 @@ public class AWSTranscripts{
 	public AWSTranscripts(JSONObject transcriptJSON) {
 		transcript = (String)transcriptJSON.get("transcript");
 	}
+	
+	public AWSTranscripts() {
+	}
 }

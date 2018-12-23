@@ -53,4 +53,7 @@ public class AWSTranscriptResults{
 		   }
 	   }
 	}
+	
+	public AWSTranscriptResults() {
+	}
 }

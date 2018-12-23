@@ -37,7 +37,7 @@ import javax.sound.sampled.AudioFileFormat.Type;
 
 public class TranscribeEditor extends Application {
 	
-	static final double SCROLL_DELTA = .001045001;
+	static double SCROLL_DELTA = .002; //.001045001;
     static final double MP3_SPEED_DELTA = 0.05;
     static final double CONFIDENCE_LIMIT = .5;
     static final int SCENE_WIDTH = 1200;
@@ -94,7 +94,7 @@ public class TranscribeEditor extends Application {
 		transcriptText.setText("If you load a non .wav audio file (like .mp3), there will be a slight delay when first playing single words. "
 				+ "A temporary .wav file will be created to allow for easier word extraction. If you want faster single word play-back, use .wav files.");
 
-		scrollPane.setOnScroll((ScrollEvent event) -> { scrollPane.setHvalue(scrollPane.getHvalue() + (event.getDeltaY()/Math.abs(event.getDeltaY()))*SCROLL_DELTA); });
+		scrollPane.setOnScroll((ScrollEvent event) -> { scrollPane.setHvalue(scrollPane.getHvalue() + (event.getDeltaY()/Math.abs(event.getDeltaY()))*SCROLL_DELTA ); });
 		scrollPane.setVbarPolicy(ScrollBarPolicy.NEVER);
 		scrollPane.setHbarPolicy(ScrollBarPolicy.ALWAYS);
 		scrollPane.setPannable(true);
@@ -163,9 +163,13 @@ public class TranscribeEditor extends Application {
 		return tf.getText();
 	}
 
-	private void loadCenterFromJsonFile() {
-		awsTranscript = AWSTranscript.createFromFile(jsonFilename);
-		
+	private void loadCenterFromJsonFile(Boolean isGooglefile) {
+		if(isGooglefile) {
+		    GoogleTranscript googleTranscript = GoogleTranscript.createFromFile(jsonFilename);
+		    awsTranscript = new AWSTranscript(googleTranscript);
+		}else {
+			awsTranscript = AWSTranscript.createFromFile(jsonFilename);
+		}
 		vBoxedItems = new ArrayList<VBox>();
 		Integer i = 0;
 		for(AWSTranscriptItem transItem : awsTranscript.results.items) {
@@ -456,9 +460,10 @@ public class TranscribeEditor extends Application {
         MenuBar mb = new MenuBar();
         
         Menu fileMenu = new Menu("_File");
-        MenuItem openJson = new MenuItem("Open _JSON Transcription");
+        MenuItem openAWSJson = new MenuItem("Open AWS Transcribe_JSON Transcription");
+        MenuItem openGoogleJson = new MenuItem("Open GoogleSpeech JSON Transcript");
         MenuItem openAudio = new MenuItem("Open _Audio");
-        MenuItem saveJson = new MenuItem("_Save JSON Transcription");
+        MenuItem saveJson = new MenuItem("_Save as AWS JSON Transcription");
         MenuItem exit = new MenuItem("_Exit");
         
         Menu helpMenu = new Menu("_Help");
@@ -473,7 +478,9 @@ public class TranscribeEditor extends Application {
 
         about.setOnAction((ActionEvent ae)-> { alert.showAndWait(); });
         
-        openJson.setOnAction((ActionEvent ae) -> { if( (jsonFilename = TranscribeUtils.getJSONFile()) != null ) loadCenterFromJsonFile(); });
+        openAWSJson.setOnAction((ActionEvent ae) -> { if( (jsonFilename = TranscribeUtils.getJSONFile()) != null ) loadCenterFromJsonFile(false); });
+        openGoogleJson.setOnAction((ActionEvent ae) -> { if( (jsonFilename = TranscribeUtils.getJSONFile()) != null ) loadCenterFromJsonFile(true); });
+
         openAudio.setOnAction((ActionEvent ae) -> { 
         	audioFilename = TranscribeUtils.getAudioFile(); 
         	if(mediaPlayer != null) {
@@ -489,12 +496,12 @@ public class TranscribeEditor extends Application {
         });
         exit.setOnAction((ActionEvent ae) -> {Platform.exit();});
         
-        openJson.setAccelerator(KeyCombination.keyCombination("shortcut+J"));
+        openAWSJson.setAccelerator(KeyCombination.keyCombination("shortcut+J"));
         openAudio.setAccelerator(KeyCombination.keyCombination("shortcut+M"));
         saveJson.setAccelerator(KeyCombination.keyCombination("shortcut+S"));
         exit.setAccelerator(KeyCombination.keyCombination("shortcut+X"));
      
-        fileMenu.getItems().addAll(openJson, openAudio, new SeparatorMenuItem(), saveJson, new SeparatorMenuItem(), exit);
+        fileMenu.getItems().addAll(openAWSJson, openGoogleJson, openAudio, new SeparatorMenuItem(), saveJson, new SeparatorMenuItem(), exit);
         mb.getMenus().addAll(fileMenu,helpMenu);
         return mb;
     }
@@ -531,6 +538,7 @@ public class TranscribeEditor extends Application {
 		}
 		
 		Iterator<VBox> iter = vBoxedItems.iterator();
+		String englishword = null;  // assume we select both english and chinese words to save, and english comes first. we form the lessonData from these...
 		while(iter.hasNext()) {
 			VBox vbox = iter.next();
 			CheckBox checkbox = (CheckBox) vbox.getChildren().get(5);
@@ -542,13 +550,23 @@ public class TranscribeEditor extends Application {
 					vbox = iter.next();
 				    checkbox = (CheckBox) vbox.getChildren().get(5);
 				    if(checkbox.selectedProperty().getValue() == true) {
-				    	end_time = ((TextField)vbox.getChildren().get(4)).getText();
+				    	if(((TextField)vbox.getChildren().get(4)).getText() != null && !((TextField)vbox.getChildren().get(4)).getText().equals("")) // if there is a new endtime, update it
+				    		end_time = ((TextField)vbox.getChildren().get(4)).getText();
 				    	wordFilename += ((TextField)vbox.getChildren().get(0)).getText();
 				    }else {
 				    	break;
 				    }
 				}
-				System.out.println("lessonWords.add(new String[] { \"" + wordFilename + "\", \"\"});");
+				if(englishword == null) {
+					englishword = wordFilename;
+					wordFilename = "english/" + wordFilename;
+				}else{
+					String section = "sectionword";
+					System.out.println(section+".add(new String[] { \"" + wordFilename + "\", \"" + englishword + "\"});");
+					englishword= null;
+					wordFilename = "chinese/" + wordFilename;
+				}
+				wordFilename = wordFilename.toLowerCase().replaceAll("[!?.]", "");
 				wordFilename += ".wav";
 				saveClip(wordFilename, start_time, end_time);	
 			}
