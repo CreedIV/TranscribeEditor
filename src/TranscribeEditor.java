@@ -16,6 +16,7 @@ import javafx.scene.control.ScrollPane.ScrollBarPolicy;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
@@ -256,7 +257,7 @@ public class TranscribeEditor extends Application {
 		end_time.setContextMenu(contextMenu);
 		
 		// update transcription on edit... keeps things up to date, in real time. better for sync, worse for performance
-		content.setOnKeyReleased((KeyEvent ke)->{ refreshTranscriptText(); }); 
+		content.setOnKeyReleased((KeyEvent ke)->{ processContentTyping(ke, vbox.getId(), content); }); 
 		speaker_label.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
 		confidence.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript);});
 		start_time.setOnKeyReleased((KeyEvent ke)-> { TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript); });
@@ -328,6 +329,8 @@ public class TranscribeEditor extends Application {
 		
 		return vbox;
 	}
+
+
 
 	private void playFromHere(String id) {
 		// after many different attempts, i got good sync in transcript tracking with this code.. 
@@ -430,6 +433,7 @@ public class TranscribeEditor extends Application {
 		refreshTranscriptText();
 		scrollingHBox.getChildren().clear();
 		scrollingHBox.getChildren().addAll(vBoxedItems);
+		vBoxedItems.get(Integer.parseInt(id)).getChildren().get(0).requestFocus(); // put focus on next vbox content so typing can resume
 	}
 
 	private void insertColumn(String id) {
@@ -447,7 +451,44 @@ public class TranscribeEditor extends Application {
 		refreshTranscriptText();
 		scrollingHBox.getChildren().clear();
 		scrollingHBox.getChildren().addAll(vBoxedItems);
+		vBoxedItems.get(Integer.parseInt(id)).getChildren().get(0).requestFocus(); // put focus on new vbox content so typing can resume
     }
+	
+	private void processContentTyping(KeyEvent ke, String id, TextField content) {
+		if(ke.getText().equals(" ")){ // i've decided to make spaces insert new vboxes. tab will get you to next vbox, space will create new subsequent vbox, this is all for editing convenience
+			content.setText(content.getText().trim());  // remove the space that was typed
+			Integer newVboxId = (Integer)(Integer.parseInt(id) + 1);
+			insertColumn(newVboxId.toString() );  // create a subsequent vbox	
+//			vBoxedItems.get(newVboxId).getChildren().get(0).requestFocus(); // put focus on new vbox content so typing can resume
+		}
+		if( ke.getCode().equals( KeyCode.DELETE )) {
+			removeColumn(id);
+		}
+		if(ke.getCode().equals(KeyCode.COMMA) && ke.isControlDown()) { // this is a shortcut for coping endtime of next vbox to current vbox endtime//, and deleting next
+			Integer nextVboxId = (Integer)(Integer.parseInt(id) + 1);
+			String copiedEndTime =  ((TextField)vBoxedItems.get(nextVboxId).getChildren().get(4)).getText();
+			((TextField)vBoxedItems.get(Integer.parseInt(id)).getChildren().get(4)).setText(copiedEndTime);
+//			removeColumn(nextVboxId.toString());
+		}
+		if(ke.getCode().equals(KeyCode.P) && ke.isControlDown()) { // shortcut for playing current word
+			playWord(id);
+		}
+		if(ke.getCode().equals(KeyCode.K) && ke.isControlDown()) { // shortcut for saving current word, "K" for keep
+			((CheckBox)vBoxedItems.get(Integer.parseInt(id)).getChildren().get(5)).setSelected(true);
+		}
+		Integer id_int = Integer.parseInt(id);
+
+		if(ke.getCode().equals(KeyCode.LEFT) && ke.isControlDown()) { // shortcut for moving to previous vbox
+			if(id_int > 0)
+				((TextField)vBoxedItems.get(id_int - 1).getChildren().get(0)).requestFocus();
+		}
+		if(ke.getCode().equals(KeyCode.RIGHT) && ke.isControlDown()) { // shortcut for moving to next vbox, tab does same thing
+			if(id_int < vBoxedItems.size() -1)
+				((TextField)vBoxedItems.get(id_int + 1).getChildren().get(0)).requestFocus();
+		}
+		
+		refreshTranscriptText();
+	}
 
 	private void refreshTranscriptText() {
 		TranscribeUtils.updateTranscriptObj(vBoxedItems, awsTranscript);
@@ -552,7 +593,7 @@ public class TranscribeEditor extends Application {
 				    if(checkbox.selectedProperty().getValue() == true) {
 				    	if(((TextField)vbox.getChildren().get(4)).getText() != null && !((TextField)vbox.getChildren().get(4)).getText().equals("")) // if there is a new endtime, update it
 				    		end_time = ((TextField)vbox.getChildren().get(4)).getText();
-				    	wordFilename += ((TextField)vbox.getChildren().get(0)).getText();
+				    	wordFilename += " "  + ((TextField)vbox.getChildren().get(0)).getText();
 				    }else {
 				    	break;
 				    }
@@ -561,12 +602,12 @@ public class TranscribeEditor extends Application {
 					englishword = wordFilename;
 					wordFilename = "english/" + wordFilename;
 				}else{
-					String section = "sectionword";
+					String section = "lessonWorkOut1";
 					System.out.println(section+".add(new String[] { \"" + wordFilename + "\", \"" + englishword + "\"});");
 					englishword= null;
 					wordFilename = "chinese/" + wordFilename;
 				}
-				wordFilename = wordFilename.toLowerCase().replaceAll("[!?.]", "");
+				wordFilename = wordFilename.toLowerCase().replaceAll("[ .?!,()]", "");
 				wordFilename += ".wav";
 				saveClip(wordFilename, start_time, end_time);	
 			}
