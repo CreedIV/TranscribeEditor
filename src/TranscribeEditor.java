@@ -138,7 +138,9 @@ public class TranscribeEditor extends Application {
             					currTransItem += skip;
             					if(itemsBehind.get() >= BEHIND_LIMIT) { // if we have not scrolled for enough items, scroll to get up-to-date
             						Bounds boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
-                					while(boundsInScene.getMinX() > SCROLL_TOL) {
+            						double oldx = -1;
+                					while(boundsInScene.getMinX() > SCROLL_TOL && (oldx != boundsInScene.getMinX())) {
+                						oldx = boundsInScene.getMinX(); // if we hit the end, it wont scroll any further... check this
                 						scrollPane.getOnScroll().handle(FAKE_SCROLL);
                 						boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
                 						itemsBehind.set(0);
@@ -178,6 +180,11 @@ public class TranscribeEditor extends Application {
 			i++;
 		}
 		refreshTranscriptText();
+		
+		transcriptText.deselect();
+		transcriptText.selectNextWord();
+		transcriptText.selectEndOfNextWord();
+		transcriptText.requestFocus();
 		
 		scrollingHBox.getChildren().clear();
 		bigVbox.getChildren().clear();
@@ -602,7 +609,7 @@ public class TranscribeEditor extends Application {
 					englishword = wordFilename;
 					wordFilename = "english/" + wordFilename;
 				}else{
-					String section = "lessonWorkOut1";
+					String section = "lessonWorkOut2";
 					System.out.println(section+".add(new String[] { \"" + wordFilename + "\", \"" + englishword + "\"});");
 					englishword= null;
 					wordFilename = "chinese/" + wordFilename;
