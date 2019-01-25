@@ -390,16 +390,21 @@ public class TranscribeEditor extends Application {
 		}
 		
 		// scoll as needed
+		int i = 0;
 		Bounds boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
 		if(boundsInScene.getMinX() > 0) {
 			while(boundsInScene.getMinX() > SCROLL_TOL) {
 				scrollPane.getOnScroll().handle(FAKE_SCROLL);
 				boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
+				if(i++ > 1000) // ugly fix for when near end and cant scroll further.
+					return;
 			}
 		}else {
 			while(boundsInScene.getMaxX() < SCROLL_TOL) {
 				scrollPane.getOnScroll().handle(FAKE_BACK_SCROLL);
 				boundsInScene = vBoxedItems.get(currTransItem).localToScene(vBoxedItems.get(currTransItem).getBoundsInLocal());
+				if(i++ > 1000)
+					return;
 			}
 		}
 		
@@ -586,7 +591,7 @@ public class TranscribeEditor extends Application {
 		}
 		
 		Iterator<VBox> iter = vBoxedItems.iterator();
-		String englishword = null;  // assume we select both english and chinese words to save, and english comes first. we form the lessonData from these...
+		String chineseword = null;  // assume we select both english and chinese words to save, and english comes first. we form the lessonData from these...
 		while(iter.hasNext()) {
 			VBox vbox = iter.next();
 			CheckBox checkbox = (CheckBox) vbox.getChildren().get(5);
@@ -605,14 +610,14 @@ public class TranscribeEditor extends Application {
 				    	break;
 				    }
 				}
-				if(englishword == null) {
-					englishword = wordFilename;
-					wordFilename = "english/" + wordFilename;
-				}else{
-					String section = "lessonWorkOut2";
-					System.out.println(section+".add(new String[] { \"" + wordFilename + "\", \"" + englishword + "\"});");
-					englishword= null;
+				if(chineseword == null) {
+					chineseword = wordFilename;
 					wordFilename = "chinese/" + wordFilename;
+				}else{
+					String section = "grammarBuilder2";
+					System.out.println(section+".add(new String[] { \"" + chineseword + "\", \"" + wordFilename + "\"});");
+					chineseword= null;
+					wordFilename = "english/" + wordFilename;
 				}
 				wordFilename = wordFilename.toLowerCase().replaceAll("[ .?!,()]", "");
 				wordFilename += ".wav";
